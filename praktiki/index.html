@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Календарь для практик</title>
+<style>
+  :root { --accent:#0f9d8a; --accent-dark:#0b7a6b; --accent-soft:#e0f4f1; --bg:#f6f7f9; --card:#fff; --text:#1f2328; --muted:#6b7280; --line:#e5e7eb; --mine:#1a73e8; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif; background:var(--bg); color:var(--text); }
+  .wrap { max-width:820px; margin:0 auto; padding:24px 16px 60px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:22px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .meta { color:var(--muted); font-size:14px; margin-bottom:18px; }
+  .days { display:flex; gap:8px; overflow-x:auto; padding-bottom:8px; margin-bottom:14px; scrollbar-width:thin; }
+  .day { flex:0 0 auto; border:1px solid var(--line); background:#fff; border-radius:10px; padding:7px 10px; cursor:pointer; text-align:center; min-width:62px; font-size:12px; color:var(--muted); }
+  .day b { display:block; font-size:16px; color:var(--text); }
+  .day.active { border-color:var(--accent); background:var(--accent-soft); color:var(--accent-dark); }
+  .day.active b { color:var(--accent-dark); }
+  .day .cnt { display:block; font-size:10px; margin-top:2px; }
+  .period { font-size:12px; color:var(--muted); margin:14px 0 8px; text-transform:uppercase; letter-spacing:.04em; }
+  .slots { display:grid; grid-template-columns:repeat(auto-fill,minmax(92px,1fr)); gap:8px; }
+  .slot { border:1px solid var(--line); background:#fff; border-radius:10px; padding:8px 6px 7px; cursor:pointer; text-align:center; font:inherit; color:var(--text); }
+  .slot .tm { font-size:15px; font-weight:600; }
+  .slot .seats { display:flex; justify-content:center; gap:3px; margin:6px 0 3px; }
+  .slot .seats i { width:9px; height:9px; border-radius:50%; background:#e3e6ea; display:block; }
+  .slot .seats i.on { background:var(--accent); }
+  .slot .lbl { font-size:11px; color:var(--muted); }
+  .slot:hover:not(:disabled) { border-color:var(--accent); }
+  .slot.active { border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-soft); }
+  .slot.has { background:#fbfefd; }
+  .slot.mine { border-color:var(--mine); }
+  .slot.mine .lbl { color:var(--mine); font-weight:600; }
+  .slot:disabled { cursor:default; opacity:.5; }
+  form { display:none; margin-top:20px; border-top:1px solid var(--line); padding-top:18px; }
+  .chosen { font-weight:600; margin-bottom:2px; }
+  label { display:block; font-size:13px; color:var(--muted); margin:12px 0 4px; }
+  input { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; font:inherit; }
+  .hint { font-size:12px; color:var(--muted); margin-top:6px; }
+  button.primary { margin-top:16px; width:100%; padding:12px; border:0; border-radius:8px; background:var(--accent); color:#fff; font-size:16px; font-weight:600; cursor:pointer; }
+  button.primary:disabled { opacity:.6; cursor:default; }
+  .msg { margin-top:12px; font-size:14px; }
+  .err { color:#c62828; }
+  .ok { background:var(--accent-soft); color:var(--accent-dark); border-radius:10px; padding:12px 14px; margin-bottom:14px; font-size:14px; }
+  .loading, .empty { color:var(--muted); padding:16px 0; }
+  .center { text-align:center; padding:30px 0; }
+  a { color:var(--accent-dark); }
+</style>
+</head>
+<body>
+<div class="wrap"><div class="card" id="app">
+  <h1>Календарь для практик</h1>
+  <div class="meta" id="meta">Загрузка расписания…</div>
+  <div id="notice"></div>
+  <div class="days" id="days"></div>
+  <div id="slots"><div class="loading">Загрузка…</div></div>
+  <form id="form">
+    <div class="chosen" id="chosen"></div>
+    <div class="hint" id="chosenSeats"></div>
+    <label for="name">Имя</label>
+    <input id="name" required maxlength="100" autocomplete="name">
+    <label for="email">Email</label>
+    <input id="email" type="email" required maxlength="200" autocomplete="email">
+    <div class="hint">Email нужен, чтобы прислать ссылку на встречу.</div>
+    <button class="primary" id="submit" type="submit">Занять место</button>
+    <div class="msg" id="msg"></div>
+  </form>
+</div></div>
+
+<script>
+const API = 'https://script.google.com/macros/s/AKfycbzRrolK0nPeMpJh1Pkq9ufHCcDjweofBR6cVlCnaxYe3OCHvROVXjbYm8fOpIICY4rDow/exec';
+const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+const MINE = 'praktikiMine', ME = 'praktikiMe';
+let cap = 4, dur = 15, byDay = {}, activeDay = null, chosen = null;
+
+function get(k, d) { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (_) { return d; } }
+function put(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} }
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+const dayKey = d => d.toLocaleDateString('sv-SE', { timeZone: tz });
+const fmtTime = d => d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: tz });
+const fmtFull = d => d.toLocaleString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', timeZone: tz });
+const hourOf = d => Number(d.toLocaleString('en-GB', { hour: '2-digit', hour12: false, timeZone: tz }));
+function mine() { const now = Date.now(); return get(MINE, []).filter(m => Date.parse(m.slot) > now - 3600e3); }
+
+function call(body) {
+  return fetch(API, { method: 'POST', credentials: 'omit', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) })
+    .then(r => r.json()).then(r => { if (r && r.ok === false) throw new Error(r.error || 'Ошибка'); return r; });
+}
+
+function load() {
+  fetch(API + '?action=pr_slots&t=' + Date.now(), { credentials: 'omit' })
+    .then(r => r.json()).then(render)
+    .catch(() => { document.getElementById('slots').innerHTML = '<div class="err">Не удалось загрузить расписание. Обновите страницу.</div>'; });
+}
+
+function render(res) {
+  cap = res.capacity; dur = res.duration; byDay = {};
+  document.getElementById('meta').textContent = 'Встреча ' + dur + ' минут в Google Meet · до ' + cap + ' человек · время в вашем часовом поясе (' + tz + ')';
+  res.slots.forEach(s => { const d = new Date(s.t); (byDay[dayKey(d)] = byDay[dayKey(d)] || []).push({ d: d, t: s.t, n: s.n }); });
+  const keys = Object.keys(byDay).sort();
+  const daysEl = document.getElementById('days'); daysEl.innerHTML = '';
+  if (!keys.length) { document.getElementById('slots').innerHTML = '<div class="empty">Свободного времени пока нет.</div>'; return; }
+  keys.forEach(k => {
+    const d = byDay[k][0].d;
+    const people = byDay[k].reduce((a, s) => a + s.n, 0);
+    const b = document.createElement('div'); b.className = 'day'; b.dataset.key = k;
+    b.innerHTML = d.toLocaleDateString('ru-RU', { weekday: 'short', timeZone: tz }) + '<b>' + d.toLocaleDateString('ru-RU', { day: 'numeric', timeZone: tz }) + '</b>' +
+      d.toLocaleDateString('ru-RU', { month: 'short', timeZone: tz }) + (people ? '<span class="cnt">записей: ' + people + '</span>' : '<span class="cnt">&nbsp;</span>');
+    b.onclick = () => selectDay(k);
+    daysEl.appendChild(b);
+  });
+  selectDay(keys.indexOf(activeDay) >= 0 ? activeDay : keys[0]);
+}
+
+function selectDay(k) {
+  activeDay = k;
+  document.querySelectorAll('.day').forEach(el => el.classList.toggle('active', el.dataset.key === k));
+  const my = mine().map(m => m.slot);
+  const groups = [['Утро', 0, 12], ['День', 12, 17], ['Вечер', 17, 24]];
+  let html = '';
+  groups.forEach(([title, from, to]) => {
+    const list = byDay[k].filter(s => { const h = hourOf(s.d); return h >= from && h < to; });
+    if (!list.length) return;
+    html += '<div class="period">' + title + '</div><div class="slots">';
+    list.forEach(s => {
+      const isMine = my.indexOf(s.t) !== -1, full = s.n >= cap;
+      let dots = ''; for (let i = 0; i < cap; i++) dots += '<i' + (i < s.n ? ' class="on"' : '') + '></i>';
+      const lbl = isMine ? 'вы записаны' : full ? 'мест нет' : s.n ? 'занято ' + s.n + ' из ' + cap : 'свободно';
+      html += '<button type="button" class="slot' + (s.n ? ' has' : '') + (isMine ? ' mine' : '') + (chosen && chosen.t === s.t ? ' active' : '') + '" data-t="' + s.t + '"' +
+        ((full || isMine) ? ' disabled' : '') + '><div class="tm">' + fmtTime(s.d) + '</div><div class="seats">' + dots + '</div><div class="lbl">' + lbl + '</div></button>';
+    });
+    html += '</div>';
+  });
+  const el = document.getElementById('slots'); el.innerHTML = html;
+  el.querySelectorAll('.slot').forEach(b => b.onclick = () => choose(byDay[k].find(s => s.t === b.dataset.t)));
+}
+
+function choose(s) {
+  chosen = s;
+  document.querySelectorAll('.slot').forEach(el => el.classList.toggle('active', el.dataset.t === s.t));
+  document.getElementById('form').style.display = 'block';
+  document.getElementById('chosen').textContent = fmtFull(s.d) + ' · ' + dur + ' мин';
+  document.getElementById('chosenSeats').textContent = s.n ? 'Уже записались: ' + s.n + ' из ' + cap : 'Вы будете первым — остальные могут присоединиться';
+  document.getElementById('msg').textContent = '';
+  const me = get(ME, {});
+  if (me.name && !document.getElementById('name').value) document.getElementById('name').value = me.name;
+  if (me.email && !document.getElementById('email').value) document.getElementById('email').value = me.email;
+  document.getElementById('form').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+document.getElementById('form').addEventListener('submit', e => {
+  e.preventDefault();
+  if (!chosen) return;
+  const btn = document.getElementById('submit'), msg = document.getElementById('msg');
+  const name = document.getElementById('name').value.trim(), email = document.getElementById('email').value.trim();
+  btn.disabled = true; btn.textContent = 'Записываем…'; msg.textContent = ''; msg.className = 'msg';
+  call({ action: 'pr_book', name: name, email: email, slot: chosen.t }).then(r => {
+    put(ME, { name: name, email: email });
+    const list = mine(); list.push({ slot: chosen.t, id: r.id, token: r.token }); put(MINE, list);
+    document.getElementById('notice').innerHTML = '<div class="ok">Готово! Вы записаны на <b>' + esc(fmtFull(chosen.d)) + '</b>. Ссылку на Google Meet пришлём на ' + esc(email) +
+      ' за 10 минут до начала. Можно занять ещё одно время.</div>';
+    chosen = null; document.getElementById('form').style.display = 'none';
+    btn.disabled = false; btn.textContent = 'Занять место';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    load();
+  }).catch(err => {
+    btn.disabled = false; btn.textContent = 'Занять место';
+    msg.className = 'msg err'; msg.textContent = err.message || 'Нет связи с сервером. Попробуйте ещё раз.';
+    load();
+  });
+});
+
+// Отмена по ссылке из письма: ?cancel=ID&t=TOKEN
+(function () {
+  const p = new URLSearchParams(location.search);
+  if (!p.get('cancel')) return load();
+  const app = document.getElementById('app');
+  app.innerHTML = '<h1>Календарь для практик</h1><div class="center" id="c">Освобождаем место…</div>';
+  call({ action: 'pr_cancel', id: p.get('cancel'), token: p.get('t') || '' }).then(r => {
+    put(MINE, get(MINE, []).filter(m => m.id !== p.get('cancel')));
+    document.getElementById('c').innerHTML = (r.already ? 'Эта запись уже была отменена.' : 'Место освобождено. Спасибо, что предупредили!') +
+      '<p><a href="' + location.pathname + '">Выбрать другое время</a></p>';
+  }).catch(e => {
+    document.getElementById('c').innerHTML = '<span class="err">' + esc(e.message) + '</span><p><a href="' + location.pathname + '">К расписанию</a></p>';
+  });
+})();
+</script>
+</body>
+</html>
