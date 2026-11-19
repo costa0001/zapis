@@ -3,151 +3,25 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Запись на встречу</title>
+<title>Бесплатная диагностика 30 минут</title>
+<meta name="robots" content="noindex">
+<link rel="canonical" href="https://bravoconstantin.com/diagnostika">
+<meta http-equiv="refresh" content="0; url=https://bravoconstantin.com/diagnostika">
+<script>
+  // Запись на диагностику переехала на bravoconstantin.com/diagnostika (регистрация 1 €, WhatsApp, напоминание в Telegram).
+  // Метки (utm и др.) из старой ссылки передаём дальше.
+  location.replace('https://bravoconstantin.com/diagnostika' + location.search);
+</script>
 <style>
-  :root { --accent:#1a73e8; --bg:#f6f7f9; --card:#fff; --text:#1f2328; --muted:#6b7280; --line:#e5e7eb; }
-  * { box-sizing:border-box; }
-  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif; background:var(--bg); color:var(--text); }
-  .wrap { max-width:720px; margin:0 auto; padding:24px 16px 48px; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:24px; }
-  h1 { font-size:22px; margin:0 0 4px; }
-  .meta { color:var(--muted); font-size:14px; margin-bottom:20px; }
-  .days { display:flex; gap:8px; overflow-x:auto; padding-bottom:6px; margin-bottom:16px; }
-  .day { flex:0 0 auto; border:1px solid var(--line); background:#fff; border-radius:10px; padding:8px 12px; cursor:pointer; text-align:center; min-width:72px; font-size:13px; }
-  .day b { display:block; font-size:16px; }
-  .day.active { border-color:var(--accent); background:#e8f0fe; color:var(--accent); }
-  .slots { display:grid; grid-template-columns:repeat(auto-fill,minmax(96px,1fr)); gap:8px; }
-  .slot { border:1px solid var(--accent); color:var(--accent); background:#fff; border-radius:8px; padding:10px 0; cursor:pointer; font-size:15px; font-weight:600; }
-  .slot:hover, .slot.active { background:var(--accent); color:#fff; }
-  form { margin-top:20px; display:none; border-top:1px solid var(--line); padding-top:20px; }
-  label { display:block; font-size:13px; color:var(--muted); margin:12px 0 4px; }
-  input, textarea { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; font:inherit; }
-  textarea { min-height:70px; resize:vertical; }
-  button.primary { margin-top:16px; width:100%; padding:12px; border:0; border-radius:8px; background:var(--accent); color:#fff; font-size:16px; font-weight:600; cursor:pointer; }
-  button.primary:disabled { opacity:.6; cursor:default; }
-  .msg { margin-top:12px; font-size:14px; }
-  .err { color:#c62828; }
-  .done { text-align:center; padding:24px 0; }
-  .done h2 { margin:0 0 8px; }
-  .empty, .loading { color:var(--muted); padding:16px 0; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif; background:#f6f7f9; color:#1f2328; }
+  .wrap { max-width:480px; margin:0 auto; padding:48px 16px; text-align:center; }
+  a { color:#2563eb; font-weight:700; }
 </style>
 </head>
 <body>
-<div class="wrap"><div class="card" id="app">
-  <h1 id="title">Запись на встречу</h1>
-  <div class="meta" id="meta">Загрузка свободного времени…</div>
-  <div class="days" id="days"></div>
-  <div class="slots" id="slots"><div class="loading">Загрузка…</div></div>
-  <form id="form">
-    <div id="chosen" style="font-weight:600"></div>
-    <label for="name">Имя</label>
-    <input id="name" required maxlength="100" autocomplete="name">
-    <label for="email">Email</label>
-    <input id="email" type="email" required maxlength="200" autocomplete="email">
-    <label for="note">Комментарий (необязательно)</label>
-    <textarea id="note" maxlength="1000"></textarea>
-    <button class="primary" id="submit" type="submit">Забронировать</button>
-    <div class="msg" id="msg"></div>
-  </form>
-</div></div>
-
-<script>
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  let data = null, byDay = {}, activeDay = null, chosen = null;
-
-  const dayKey = d => d.toLocaleDateString('sv-SE', { timeZone: tz });
-  const fmtTime = d => d.toLocaleTimeString('ru-RU', { hour:'2-digit', minute:'2-digit', timeZone: tz });
-  const fmtFull = d => d.toLocaleString('ru-RU', { weekday:'long', day:'numeric', month:'long', hour:'2-digit', minute:'2-digit', timeZone: tz });
-
-  const API = 'https://script.google.com/macros/s/AKfycbzRrolK0nPeMpJh1Pkq9ufHCcDjweofBR6cVlCnaxYe3OCHvROVXjbYm8fOpIICY4rDow/exec';
-
-  function load() {
-    fetch(API + '?action=slots&t=' + Date.now(), { credentials: 'omit' })
-      .then(r => r.json())
-      .then(render)
-      .catch(() => { document.getElementById('slots').innerHTML = '<div class="err">Не удалось загрузить свободное время. Обновите страницу.</div>'; });
-  }
-
-  function render(res) {
-    data = res; byDay = {};
-    document.getElementById('title').textContent = res.title;
-    document.getElementById('meta').textContent = res.duration + ' мин · Google Meet · время показано в вашем часовом поясе (' + tz + ')';
-    res.slots.forEach(iso => { const d = new Date(iso); (byDay[dayKey(d)] = byDay[dayKey(d)] || []).push(d); });
-    const keys = Object.keys(byDay).sort();
-    const daysEl = document.getElementById('days'); daysEl.innerHTML = '';
-    if (!keys.length) {
-      document.getElementById('slots').innerHTML = '<div class="empty">Свободного времени на ближайшие дни нет.</div>';
-      return;
-    }
-    keys.forEach(k => {
-      const d = byDay[k][0];
-      const b = document.createElement('div'); b.className = 'day';
-      b.innerHTML = d.toLocaleDateString('ru-RU', { weekday:'short', timeZone: tz }) + '<b>' +
-        d.toLocaleDateString('ru-RU', { day:'numeric', timeZone: tz }) + '</b>' +
-        d.toLocaleDateString('ru-RU', { month:'short', timeZone: tz });
-      b.onclick = () => selectDay(k);
-      b.dataset.key = k;
-      daysEl.appendChild(b);
-    });
-    selectDay(keys.indexOf(activeDay) >= 0 ? activeDay : keys[0]);
-  }
-
-  function selectDay(k) {
-    activeDay = k;
-    document.querySelectorAll('.day').forEach(el => el.classList.toggle('active', el.dataset.key === k));
-    const slotsEl = document.getElementById('slots'); slotsEl.innerHTML = '';
-    byDay[k].forEach(d => {
-      const b = document.createElement('button'); b.type = 'button'; b.className = 'slot';
-      b.textContent = fmtTime(d);
-      b.onclick = () => choose(d, b);
-      slotsEl.appendChild(b);
-    });
-  }
-
-  function choose(d, btn) {
-    chosen = d;
-    document.querySelectorAll('.slot').forEach(el => el.classList.remove('active'));
-    btn.classList.add('active');
-    const f = document.getElementById('form'); f.style.display = 'block';
-    document.getElementById('chosen').textContent = fmtFull(d);
-    document.getElementById('msg').textContent = '';
-    document.getElementById('name').focus();
-  }
-
-  document.getElementById('form').addEventListener('submit', e => {
-    e.preventDefault();
-    if (!chosen) return;
-    const btn = document.getElementById('submit'), msg = document.getElementById('msg');
-    btn.disabled = true; btn.textContent = 'Бронируем…'; msg.textContent = ''; msg.className = 'msg';
-    const email = document.getElementById('email').value;
-    const fail = text => {
-      btn.disabled = false; btn.textContent = 'Забронировать';
-      msg.className = 'msg err'; msg.textContent = text;
-      load();
-    };
-    fetch(API, {
-      method: 'POST',
-      credentials: 'omit',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({
-        name: document.getElementById('name').value,
-        email: email,
-        note: document.getElementById('note').value,
-        slot: chosen.toISOString(),
-      }),
-    })
-      .then(r => r.json())
-      .then(r => {
-        if (!r.ok) return fail(r.error || 'Не удалось забронировать. Попробуйте ещё раз.');
-        document.getElementById('app').innerHTML =
-          '<div class="done"><h2>Готово! Встреча забронирована</h2><p>' + fmtFull(chosen) +
-          '</p><p>Подтверждение и ссылка на Google Meet отправлены на ' + email.replace(/</g,'&lt;') +
-          '.<br>Напоминания придут за 24 часа, за 1 час и за 10 минут до начала.</p></div>';
-      })
-      .catch(() => fail('Нет связи с сервером. Попробуйте ещё раз.'));
-  });
-
-  load();
-</script>
+  <div class="wrap">
+    <p>Запись на бесплатную диагностику теперь здесь:</p>
+    <p><a href="https://bravoconstantin.com/diagnostika">bravoconstantin.com/diagnostika</a></p>
+  </div>
 </body>
 </html>
